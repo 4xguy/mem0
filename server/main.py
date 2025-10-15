@@ -34,6 +34,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "").lower() in {"1", "true", "yes"}
 
+history_dir = os.path.dirname(HISTORY_DB_PATH)
+if history_dir:
+    os.makedirs(history_dir, exist_ok=True)
+
 vector_store_config: Optional[Dict[str, Any]] = None
 if all([POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD]):
     vector_store_config = {
