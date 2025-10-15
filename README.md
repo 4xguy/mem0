@@ -167,3 +167,12 @@ We now have a paper you can cite:
 ## ⚖️ License
 
 Apache 2.0 — see the [LICENSE](https://github.com/mem0ai/mem0/blob/main/LICENSE) file for details.
+
+## 🧰 Production Deployment & CLI
+
+- Self‑host the REST API with the provided Dockerfile under `server/` and point your domain to port `8000`. See `server/README.md` and `deploy/README.md`.
+- Use the companion CLI to keep agents token‑efficient and consistent: `4xguy/memory-cli` (mem0ctl). Typical flow:
+  - `mem0ctl login` (Auth0 device code)
+  - `echo "I like teal" | mem0ctl add --user demo`
+  - `mem0ctl search --user demo --query "favorite color" -n 3`
+- The CLI communicates with this server over `/memories` and `/search`, returning compact JSON by default.
