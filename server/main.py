@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
 
 from mem0 import Memory
 
@@ -33,6 +34,16 @@ MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "").lower() in {"1", "true", "yes"}
+
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("MEM0_RATE_LIMIT_PER_MINUTE", "0") or 0)
+_rate_windows = {}
+
+
+def json_error(code: str, message: str, details: dict | None = None) -> dict:
+    err = {"error": {"code": code, "message": message}}
+    if details:
+        err["error"]["details"] = details
+    return err
 
 history_dir = os.path.dirname(HISTORY_DB_PATH)
 if history_dir:
@@ -113,7 +124,54 @@ def get_memory_instance() -> Memory:
         raise HTTPException(status_code=503, detail=message)
     return MEMORY_INSTANCE
 
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        return await call_next(request)
+    path = request.url.path
+    if path in {"/health", "/docs", "/openapi.json"}:
+        return await call_next(request)
+    # naive per-IP per-minute window
+    ip = request.client.host if request.client else "unknown"
+    key = (ip, path)
+    import time
+    now = int(time.time())
+    window = now // 60
+    count, curwin = _rate_windows.get(key, (0, window))
+    if curwin != window:
+        count = 0
+        curwin = window
+    count += 1
+    _rate_windows[key] = (count, curwin)
+    if count > RATE_LIMIT_PER_MINUTE:
+        from fastapi import status
+        return JSONResponse(json_error("RATE_LIMIT_EXCEEDED", "Too many requests.", {"limit": RATE_LIMIT_PER_MINUTE, "window": "1m"}), status_code=status.HTTP_429_TOO_MANY_REQUESTS, headers={"Retry-After": "60"})
+    return await call_next(request)
+
 app = FastAPI(
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(json_error("VALIDATION_ERROR", "Invalid request.", {"errors": exc.errors()}), status_code=422)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict) and "error" in detail:
+        payload = detail
+    else:
+        payload = json_error("HTTP_ERROR", str(detail))
+    return JSONResponse(payload, status_code=exc.status_code)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    import traceback
+    logging.exception("Unhandled error: %s", exc)
+    return JSONResponse(json_error("INTERNAL_ERROR", "An unexpected error occurred."), status_code=500)
+
     title="Mem0 REST APIs",
     description="A REST API for managing and searching memories for your AI Agents and Apps.",
     version="1.0.0",
@@ -138,6 +196,9 @@ class SearchRequest(BaseModel):
     user_id: Optional[str] = None
     run_id: Optional[str] = None
     agent_id: Optional[str] = None
+    limit: Optional[int] = Field(default=None, description="Max results to return.")
+    summary: Optional[bool] = Field(default=False, description="Return a compact summary of results.")
+    max_summary_tokens: Optional[int] = Field(default=150, description="Upper bound for summary tokens.")
     filters: Optional[Dict[str, Any]] = None
 
 
@@ -203,8 +264,30 @@ def search_memories(search_req: SearchRequest):
     """Search for memories based on a query."""
     try:
         memory = get_memory_instance()
-        params = {k: v for k, v in search_req.model_dump().items() if v is not None and k != "query"}
-        return memory.search(query=search_req.query, **params)
+        payload = search_req.model_dump()
+        summary = payload.pop("summary", False)
+        max_summary_tokens = payload.pop("max_summary_tokens", 150)
+        results = memory.search(query=search_req.query, **{k: v for k, v in payload.items() if k != "query" and v is not None})
+        if summary:
+            try:
+                mem_texts = [r.get("memory", "") for r in results.get("results", []) if r.get("memory")]
+                if mem_texts:
+                    content = "
+".join(f"- {m}" for m in mem_texts)
+                    system = "You are a concise assistant. Summarize the following memories in <=150 tokens without bullets. Focus on stable preferences and facts."
+                    msg = [{"role": "system", "content": system}, {"role": "user", "content": content}]
+                    summary_text = memory.llm.generate_response(msg, max_tokens=max_summary_tokens)
+                    if isinstance(summary_text, dict) and "content" in summary_text:
+                        summary_text = summary_text.get("content")
+                    results["summary"] = summary_text
+                else:
+                    results["summary"] = ""
+            except Exception as se:
+                logging.exception("Error generating summary: %s", se)
+                results["summary"] = ""
+        return JSONResponse(content=results)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error in search_memories:")
         raise HTTPException(status_code=500, detail=str(e))
