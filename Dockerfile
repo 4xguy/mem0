@@ -14,7 +14,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock README.md ./
 COPY mem0 ./mem0
 RUN pip install --upgrade pip \
-    && pip install ".[graph,llms]" "psycopg[binary]>=3.2.8" "psycopg-pool>=3.2.6" "pgvector>=0.3.6" "redis>=5.0.0,<6.0.0"
+    && pip install ".[llms]" "langchain-neo4j>=0.4.0" "neo4j>=5.23.1" "psycopg[binary]>=3.2.8" "psycopg-pool>=3.2.6" "pgvector>=0.3.6" "redis>=5.0.0,<6.0.0"
 
 # Install FastAPI server dependencies.
 RUN pip install fastapi==0.115.8 uvicorn[standard]==0.34.0 python-dotenv==1.0.1 pydantic==2.10.4
