@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -369,11 +370,45 @@ def reset_memory():
 
 @app.get("/whoami", summary="Report request identity")
 def whoami(request: Request):
-    """Return basic information about the current request/authorization header."""
+    """Return structured information about the forwarded Authorization header."""
     auth_header = request.headers.get("authorization")
+    if not auth_header:
+        return {"status": "ok", "authorization": None}
+
+    scheme, _, credentials = auth_header.partition(" ")
+    scheme = scheme or None
+    token = credentials or None
+
+    payload = {
+        "scheme": scheme,
+        "token_present": bool(token),
+    }
+
+    if token and token.count(".") >= 1:
+        parts = token.split(".")
+        try:
+            import base64
+            header_raw = parts[0]
+            claims_raw = parts[1] if len(parts) > 1 else ""
+            padding = lambda s: s + "=" * (-len(s) % 4)
+            header = json.loads(base64.urlsafe_b64decode(padding(header_raw)).decode("utf-8"))
+        except Exception:  # pragma: no cover - best effort
+            header = None
+        try:
+            import base64
+            claims = json.loads(base64.urlsafe_b64decode(padding(claims_raw)).decode("utf-8"))
+        except Exception:  # pragma: no cover - best effort
+            claims = None
+        if header:
+            payload["jwt_header"] = header
+        if claims:
+            payload["jwt_claims"] = claims
+    if token:
+        payload["token_preview"] = token[:16] + "..." if len(token) > 16 else token
+
     return {
         "status": "ok",
-        "authorization": auth_header or None,
+        "authorization": payload,
     }
 
 
