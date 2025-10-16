@@ -18,14 +18,14 @@
 - [x] Preserve the existing JSON error envelope for 401/403 responses using `json_error` across new authorization guards.
 
 ## Phase 3 – Scope Handling & Admin Overrides
-- Define required scopes per operation (`mem0:read`, `mem0:write`, optional `mem0:admin`) and wire checks into the identity dependency.
-- Ensure admin scope bypass paths are centralized and auditable; capture decision points for future logging.
-- Update configuration loading so scopes list is available everywhere ownership checks run.
+- [x] Defined `mem0:read`, `mem0:write`, and `mem0:admin` helpers (`require_scope`, `require_scopes`) in `server/main.py` to guard each route.
+- [x] Centralized admin overrides through `bind_user_to_identity` and `ensure_memory_access`, ensuring audit-friendly error details.
+- [x] Reused the existing identity payload (`Identity.scopes`) so scope checks are available wherever dependencies run.
 
 ## Phase 4 – Documentation & Operator Enablement
-- Update `deploy/README.md` with new Auth0 environment variables, setup steps, and troubleshooting for 401/403 errors.
-- Add example curl sequences showing success/failure cases with and without proper scopes.
-- Briefly document identity expectations in API reference / docs so external integrators plan for Auth0 subject binding.
+- [x] Expanded `deploy/README.md` with scope mapping, 401/403 troubleshooting, and quick curl examples.
+- [x] Added scope and troubleshooting sections (plus sample requests) to `docs/mem0-jwt-phase0-prep.md`.
+- [x] Highlighted admin/default identity behavior so integrators plan for Auth0 subject binding.
 
 ## Phase 5 – Testing, Rollout, & Migration Support
 - Author unit/integration tests covering valid/invalid JWTs, default-to-sub behavior, and admin override cases.

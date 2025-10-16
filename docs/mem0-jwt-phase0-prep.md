@@ -35,3 +35,32 @@ Observations:
 - Log the confirmed Auth0 values in your shared deployment tracker with owner + date.
 - Decide on exposure policy for `/docs` and `/whoami` before Phase 1 to avoid surprises during dependency wiring.
 - Draft migration stories for legacy identifiers once admin tooling is finalised.
+
+## Scope Enforcement Summary
+- `mem0:read` gates GET/search flows (list, search, get by ID, history).
+- `mem0:write` is required for add/update/delete/reset paths.
+- `mem0:admin` allows cross-user overrides and privileged endpoints such as `/configure` and `/reset`.
+- Admin tokens bypass the helper scope checks but should still include `mem0:write` for destructive workflows.
+
+## 401/403 Troubleshooting
+1. **401 AUTH_HEADER_MISSING** – Authorization header missing or malformed. Ensure the client sends `Authorization: Bearer <token>` signed for the configured audience.
+2. **403 FORBIDDEN** – Scope mismatch or cross-user attempt. The JSON envelope surfaces `required_scope`, `requested_user_id`, and the caller `sub` for quick triage.
+3. **403 (ownership undefined)** – Legacy memories without `user_id` need an admin token until migration rewrites the owner field.
+
+## Example Requests
+```bash
+# Read own memories
+curl -H "Authorization: Bearer $USER_TOKEN" https://mem0.icvida.com/memories
+
+# Cross-user search without admin (returns 403)
+curl -H "Authorization: Bearer $USER_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"query":"preferences","user_id":"someone_else"}' \
+     https://mem0.icvida.com/search
+
+# Admin overriding user scope
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"messages":[{"role":"user","content":"Needs follow up"}],"user_id":"someone_else"}' \
+     https://mem0.icvida.com/memories
+```

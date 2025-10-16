@@ -74,6 +74,11 @@ Backport the fix to `main` if it is not already there (`git switch main && git c
 
 ## Runtime Notes
 
+### Auth scopes
+- `mem0:read` for search/list/get/history operations; `mem0:write` for add/update/delete/reset; `mem0:admin` to act on other users or run destructive actions like `/reset` and `/configure`.
+- Example 401 vs 403: `curl -H "Authorization: Bearer invalid" https://mem0.icvida.com/memories` → 401 `AUTH_HEADER_MISSING`; `curl -H "Authorization: Bearer $USER_TOKEN" -X DELETE https://mem0.icvida.com/memories/some-id` with a non-admin token → 403 `FORBIDDEN` detailing the missing scope.
+- During rollout, verify Dokploy secrets inject the tenant-specific domain/audience and that service principals include the scopes above.
+
 ### Health check
 - Configure Dokploy (or any load balancer) to poll `GET /health` every 10 seconds (timeout 5 seconds) so unhealthy pods are recycled automatically.
 - The endpoint returns `{"status":"ok"}` when the Mem0 backend has initialised successfully.

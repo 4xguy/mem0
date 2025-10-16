@@ -74,10 +74,45 @@ def require_identity(authorization: str = Header(default=None)) -> Identity:
     return identity
 
 ADMIN_SCOPE = "mem0:admin"
+READ_SCOPE = "mem0:read"
+WRITE_SCOPE = "mem0:write"
 
 
 def has_admin(identity: Identity) -> bool:
     return ADMIN_SCOPE in identity.scopes
+
+
+def has_scope(identity: Identity, scope: str) -> bool:
+    return scope in identity.scopes
+
+
+def require_scope(
+    identity: Identity,
+    scope: str,
+    *,
+    operation: str,
+    resource: Optional[str] = None,
+) -> None:
+    if has_admin(identity) or has_scope(identity, scope):
+        return
+    details = {"required_scope": scope, "sub": identity.sub, "operation": operation}
+    if resource is not None:
+        details["resource"] = resource
+    raise HTTPException(
+        status_code=403,
+        detail=json_error("FORBIDDEN", f"Scope {scope} is required for this operation.", details),
+    )
+
+
+def require_scopes(
+    identity: Identity,
+    scopes: List[str],
+    *,
+    operation: str,
+    resource: Optional[str] = None,
+) -> None:
+    for scope in scopes:
+        require_scope(identity, scope, operation=operation, resource=resource)
 
 
 def bind_user_to_identity(
@@ -304,6 +339,7 @@ def set_config(config: Dict[str, Any], identity: Identity = Depends(require_iden
                 {"operation": "config:set", "sub": identity.sub},
             ),
         )
+    require_scope(identity, WRITE_SCOPE, operation="config:set")
     global MEMORY_INSTANCE, MEMORY_INIT_ERROR, DEFAULT_CONFIG
     MEMORY_INSTANCE = Memory.from_config(config)
     DEFAULT_CONFIG = config
@@ -314,6 +350,7 @@ def set_config(config: Dict[str, Any], identity: Identity = Depends(require_iden
 @app.post("/memories", summary="Create memories")
 def add_memory(memory_create: MemoryCreate, identity: Identity = Depends(require_identity)):
     """Store new memories."""
+    require_scope(identity, WRITE_SCOPE, operation="memories:create")
     bound_user_id = bind_user_to_identity(
         memory_create.user_id, identity, operation="memories:create", resource="payload"
     )
@@ -338,6 +375,7 @@ def get_all_memories(
     identity: Identity = Depends(require_identity),
 ):
     """Retrieve stored memories."""
+    require_scope(identity, READ_SCOPE, operation="memories:list")
     user_id = bind_user_to_identity(user_id, identity, operation="memories:list", resource="query")
     try:
         memory = get_memory_instance()
@@ -353,6 +391,7 @@ def get_all_memories(
 @app.get("/memories/{memory_id}", summary="Get a memory")
 def get_memory_item(memory_id: str, identity: Identity = Depends(require_identity)):
     """Retrieve a specific memory by ID."""
+    require_scope(identity, READ_SCOPE, operation="memories:get", resource=memory_id)
     try:
         memory = get_memory_instance()
         record = memory.get(memory_id)
@@ -373,6 +412,7 @@ def get_memory_item(memory_id: str, identity: Identity = Depends(require_identit
 @app.post("/search", summary="Search memories")
 def search_memories(search_req: SearchRequest, identity: Identity = Depends(require_identity)):
     """Search for memories based on a query."""
+    require_scope(identity, READ_SCOPE, operation="memories:search")
     try:
         memory = get_memory_instance()
         payload = search_req.model_dump()
@@ -410,6 +450,7 @@ def search_memories(search_req: SearchRequest, identity: Identity = Depends(requ
 @app.put("/memories/{memory_id}", summary="Update a memory")
 def update_memory(memory_id: str, updated_memory: Dict[str, Any], identity: Identity = Depends(require_identity)):
     """Update an existing memory with new content."""
+    require_scopes(identity, [READ_SCOPE, WRITE_SCOPE], operation="memories:update", resource=memory_id)
     try:
         memory = get_memory_instance()
         record = memory.get(memory_id)
@@ -452,6 +493,7 @@ def update_memory(memory_id: str, updated_memory: Dict[str, Any], identity: Iden
 @app.get("/memories/{memory_id}/history", summary="Get memory history")
 def memory_history(memory_id: str, identity: Identity = Depends(require_identity)):
     """Retrieve memory history."""
+    require_scope(identity, READ_SCOPE, operation="memories:history", resource=memory_id)
     try:
         memory = get_memory_instance()
         record = memory.get(memory_id)
@@ -472,6 +514,7 @@ def memory_history(memory_id: str, identity: Identity = Depends(require_identity
 @app.delete("/memories/{memory_id}", summary="Delete a memory")
 def delete_memory(memory_id: str, identity: Identity = Depends(require_identity)):
     """Delete a specific memory by ID."""
+    require_scopes(identity, [READ_SCOPE, WRITE_SCOPE], operation="memories:delete", resource=memory_id)
     try:
         memory = get_memory_instance()
         record = memory.get(memory_id)
@@ -498,6 +541,7 @@ def delete_all_memories(
     identity: Identity = Depends(require_identity),
 ):
     """Delete all memories for a given identifier."""
+    require_scope(identity, WRITE_SCOPE, operation="memories:delete_all")
     user_id = bind_user_to_identity(user_id, identity, operation="memories:delete_all", resource="query")
     try:
         memory = get_memory_instance()
@@ -514,6 +558,7 @@ def delete_all_memories(
 @app.post("/reset", summary="Reset all memories")
 def reset_memory(identity: Identity = Depends(require_identity)):
     """Completely reset stored memories."""
+    require_scope(identity, WRITE_SCOPE, operation="memories:reset")
     if not has_admin(identity):
         raise HTTPException(
             status_code=403,
