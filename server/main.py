@@ -1,15 +1,15 @@
 import logging
 import os
-import json
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from fastapi.exceptions import RequestValidationError
 
 from mem0 import Memory
+from server.auth import AuthError, Identity, JWTVerifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -32,6 +32,9 @@ MEMGRAPH_URI = os.environ.get("MEMGRAPH_URI")
 MEMGRAPH_USERNAME = os.environ.get("MEMGRAPH_USERNAME")
 MEMGRAPH_PASSWORD = os.environ.get("MEMGRAPH_PASSWORD")
 
+AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN")
+AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE")
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "").lower() in {"1", "true", "yes"}
@@ -39,12 +42,36 @@ ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "").lower() in {"1", "true", 
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("MEM0_RATE_LIMIT_PER_MINUTE", "0") or 0)
 _rate_windows = {}
 
+JWT_VERIFIER: Optional[JWTVerifier] = None
+if AUTH0_DOMAIN and AUTH0_AUDIENCE:
+    try:
+        JWT_VERIFIER = JWTVerifier(AUTH0_DOMAIN, AUTH0_AUDIENCE)
+    except ValueError as exc:
+        logging.error("Invalid Auth0 configuration: %s", exc)
+else:
+    logging.warning("Auth0 domain or audience not configured; protected endpoints will reject requests until configured.")
+
 
 def json_error(code: str, message: str, details: dict | None = None) -> dict:
     err = {"error": {"code": code, "message": message}}
     if details:
         err["error"]["details"] = details
     return err
+
+def require_identity(authorization: str = Header(default=None)) -> Identity:
+    if JWT_VERIFIER is None:
+        raise HTTPException(
+            status_code=503,
+            detail=json_error("AUTH_NOT_CONFIGURED", "Auth0 configuration is not ready."),
+        )
+    try:
+        identity = JWT_VERIFIER.verify_authorization_header(authorization)
+    except AuthError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=json_error(exc.code, exc.message, exc.details),
+        )
+    return identity
 
 history_dir = os.path.dirname(HISTORY_DB_PATH)
 if history_dir:
@@ -204,7 +231,7 @@ class SearchRequest(BaseModel):
 
 
 @app.post("/configure", summary="Configure Mem0")
-def set_config(config: Dict[str, Any]):
+def set_config(config: Dict[str, Any], _identity: Identity = Depends(require_identity)):
     """Set memory configuration."""
     global MEMORY_INSTANCE, MEMORY_INIT_ERROR, DEFAULT_CONFIG
     MEMORY_INSTANCE = Memory.from_config(config)
@@ -214,7 +241,7 @@ def set_config(config: Dict[str, Any]):
 
 
 @app.post("/memories", summary="Create memories")
-def add_memory(memory_create: MemoryCreate):
+def add_memory(memory_create: MemoryCreate, _identity: Identity = Depends(require_identity)):
     """Store new memories."""
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
@@ -234,6 +261,7 @@ def get_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    _identity: Identity = Depends(require_identity),
 ):
     """Retrieve stored memories."""
     if not any([user_id, run_id, agent_id]):
@@ -250,7 +278,7 @@ def get_all_memories(
 
 
 @app.get("/memories/{memory_id}", summary="Get a memory")
-def get_memory_item(memory_id: str):
+def get_memory_item(memory_id: str, _identity: Identity = Depends(require_identity)):
     """Retrieve a specific memory by ID."""
     try:
         memory = get_memory_instance()
@@ -261,7 +289,7 @@ def get_memory_item(memory_id: str):
 
 
 @app.post("/search", summary="Search memories")
-def search_memories(search_req: SearchRequest):
+def search_memories(search_req: SearchRequest, _identity: Identity = Depends(require_identity)):
     """Search for memories based on a query."""
     try:
         memory = get_memory_instance()
@@ -294,7 +322,7 @@ def search_memories(search_req: SearchRequest):
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
-def update_memory(memory_id: str, updated_memory: Dict[str, Any]):
+def update_memory(memory_id: str, updated_memory: Dict[str, Any], _identity: Identity = Depends(require_identity)):
     """Update an existing memory with new content."""
     try:
         memory = get_memory_instance()
@@ -328,7 +356,7 @@ def update_memory(memory_id: str, updated_memory: Dict[str, Any]):
 
 
 @app.get("/memories/{memory_id}/history", summary="Get memory history")
-def memory_history(memory_id: str):
+def memory_history(memory_id: str, _identity: Identity = Depends(require_identity)):
     """Retrieve memory history."""
     try:
         memory = get_memory_instance()
@@ -339,7 +367,7 @@ def memory_history(memory_id: str):
 
 
 @app.delete("/memories/{memory_id}", summary="Delete a memory")
-def delete_memory(memory_id: str):
+def delete_memory(memory_id: str, _identity: Identity = Depends(require_identity)):
     """Delete a specific memory by ID."""
     try:
         memory = get_memory_instance()
@@ -355,6 +383,7 @@ def delete_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    _identity: Identity = Depends(require_identity),
 ):
     """Delete all memories for a given identifier."""
     if not any([user_id, run_id, agent_id]):
@@ -372,7 +401,7 @@ def delete_all_memories(
 
 
 @app.post("/reset", summary="Reset all memories")
-def reset_memory():
+def reset_memory(_identity: Identity = Depends(require_identity)):
     """Completely reset stored memories."""
     try:
         memory = get_memory_instance()
@@ -384,46 +413,14 @@ def reset_memory():
 
 
 @app.get("/whoami", summary="Report request identity")
-def whoami(request: Request):
-    """Return structured information about the forwarded Authorization header."""
-    auth_header = request.headers.get("authorization")
-    if not auth_header:
-        return {"status": "ok", "authorization": None}
-
-    scheme, _, credentials = auth_header.partition(" ")
-    scheme = scheme or None
-    token = credentials or None
-
-    payload = {
-        "scheme": scheme,
-        "token_present": bool(token),
-    }
-
-    if token and token.count(".") >= 1:
-        parts = token.split(".")
-        try:
-            import base64
-            header_raw = parts[0]
-            claims_raw = parts[1] if len(parts) > 1 else ""
-            padding = lambda s: s + "=" * (-len(s) % 4)
-            header = json.loads(base64.urlsafe_b64decode(padding(header_raw)).decode("utf-8"))
-        except Exception:  # pragma: no cover - best effort
-            header = None
-        try:
-            import base64
-            claims = json.loads(base64.urlsafe_b64decode(padding(claims_raw)).decode("utf-8"))
-        except Exception:  # pragma: no cover - best effort
-            claims = None
-        if header:
-            payload["jwt_header"] = header
-        if claims:
-            payload["jwt_claims"] = claims
-    if token:
-        payload["token_preview"] = token[:16] + "..." if len(token) > 16 else token
-
+def whoami(identity: Identity = Depends(require_identity)):
+    """Return the authenticated caller plus raw claims for debugging."""
     return {
         "status": "ok",
-        "authorization": payload,
+        "sub": identity.sub,
+        "scopes": sorted(identity.scopes),
+        "claims": identity.claims,
+        "jwks_cache_hit": identity.jwks_cache_hit,
     }
 
 
