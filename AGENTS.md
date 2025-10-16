@@ -31,3 +31,11 @@
 ## Security & Configuration Tips
 - Keep secrets in `.env` files (already gitignored) and document new variables in `docs/` and `server/README.md`.
 - When adding providers, contribute sanitised examples to `examples/` and gate credentialed tests with marks or `describe.skip` so CI stays green.
+
+## Personal Memory Workflow
+- **Before you work**: `mem0ctl search --user keith --query "<topic>" -n 3 --summary` and skim the summary/top hits to ground your response.
+- **After you learn something durable** (preference, plan, decision, standing instruction): `mem0ctl add --user keith --text "<concise fact>"`.
+- Use `mem0ctl update <id> --user keith --text "<revised fact>"` when information changes, and `mem0ctl delete <id>` only if Keith requests removal.
+- Reserve `mem0ctl reset --user keith` for explicit cleanup requests with permission.
+- Store **long-lived personal context only** (preferences, recurring tasks, commitments, canonical settings). Skip transient chatter, temporary calculations, and any secrets/credentials.
+- When unsure, ask before writing, and prefer summarising insight over copying raw conversation.
