@@ -99,9 +99,7 @@ pytest tests/test_memory.py::test_specific_function -v
 
 Each component has its own dependencies and build process. When making changes that affect multiple components, ensure compatibility across all affected parts.
 
-## Personal Memory Usage
-- Run `mem0ctl search --user keith --query "<topic>" -n 3 --summary` at the start of a task; fold only the summary or top two results into your prompt.
-- Write new, durable facts with `mem0ctl add --user keith --text "<concise fact>"` once you’ve confirmed them; use `mem0ctl update <id> --user keith --text "<updated fact>"` when adjusting existing entries.
-- Only log information that will stay useful to Keith (preferences, workflows, ongoing projects, decisions). Do **not** store ephemeral conversation, speculative notes, secrets, or tokens.
-- Use `mem0ctl delete <id>` or `reset --user keith` solely when Keith explicitly requests removal/cleanup.
-- If you are uncertain whether to store something, ask first or skip.
+### Personal Memory Usage
+```
+⟦MEM0:v1|usr:keith|@s=search,@a=add,@u=update,@d=delete⟧⟦ops:@pre=before_response,@post=after_response,⊕sig=significance⟧#Mem0Flow##@pre:Auto-Search```IF:past_ref|pref_q|"my usual"|assumed_ctx→@s -n3 --summary```##@post:Auto-Store```IF:⊕sig→@s_similar→exists?@u:@a```##⊕sig Triggers:"I prefer/always/never"→@a;"let's start"|"new project"→@a;solution_after_struggle→@a;"decided to use"|config→@a;routine/goal/contact→@a##Explicit:"remember this"→compress→@a;"update my X"→@s→@u;"forget X"→@s→@d;"what do you know"→@s##Compress:Raw→Insight;Not transcript;Future-test:need_2wk?##Skip:debug_active(final_only);chat/social;regeneratable;tmp_state##Update_Logic:```similar?→contradicts:@u|extends:@u|else:@a```##Cmd:@s:`mem0ctl search --user keith --query "..." -n3 --summary`;@a:`echo "..."|mem0ctl add --user keith`;@u:`mem0ctl update <id> --text "..." --user keith`##Meta:doubt→probably_store;search_cheap→do_it
+```
