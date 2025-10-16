@@ -1,38 +1,34 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `mem0/`: Python memory engine (clients, vector stores, LLM connectors, telemetry). Export public APIs through `mem0/__init__.py` after stabilising interfaces.
-- `server/`: FastAPI reference service binding Mem0 to Postgres, Neo4j, and OpenAI; configuration is driven by `.env`.
-- `mem0-ts/`: TypeScript SDK built with tsup; sources sit in `src/`, Jest specs in `tests/`.
-- Supporting resources: `tests/` mirrors the Python package layout, `examples/` and `cookbooks/` showcase integrations, `docs/` powers Mintlify docs, and `evaluation/` tracks benchmark harnesses.
+- `mem0/`: core Python package (memory engine, vector stores, connectors). Public APIs surface via `mem0/__init__.py`.
+- `server/`: FastAPI reference service binding Mem0 to Postgres, Neo4j, and OpenAI. Runtime config lives in `server/main.py`.
+- `mem0-ts/`: TypeScript SDK (tsup build, Jest tests) under `src/` and `tests/`.
+- `docs/`, `examples/`, `tests/`, and `deploy/` provide documentation, runnable samples, automated tests, and deployment manifests.
 
 ## Build, Test, and Development Commands
-- Run `make install` to provision the Hatch environment.
-- `make format`, `make sort`, and `make lint` drive Ruff formatting, Black-profile import ordering, and lint checks.
-- `make test` runs `pytest`; use `make test-py-3.10` when validating specific interpreters.
-- Inside `mem0-ts/`, use `pnpm install`, `pnpm test`, and `pnpm build` (runs Prettier + tsup). Apply `pnpm format` before publishing artifacts.
-- Launch the REST API with `uvicorn server.main:app --reload` after copying `server/.env.example` to `.env`.
+- `make install`: create the Hatch environment with all Python deps.
+- `make format` / `make sort` / `make lint`: run Ruff formatting, import sorting, and lint checks.
+- `make test`: execute the Python test suite via pytest.
+- `pnpm install && pnpm test` in `mem0-ts/`: install Node deps and run SDK unit tests.
+- Local API smoke test: `uvicorn server.main:app --reload` (requires `.env` per `server/.env.example`).
 
 ## Coding Style & Naming Conventions
-- Python: 4-space indentation, Ruff-managed formatting, 120-character limit. Keep modules/functions snake_case, classes PascalCase, constants UPPER_SNAKE, and annotate new APIs with type hints.
-- TypeScript: follow Prettier defaults and the strict TS config. Files stay kebab-case, exported symbols PascalCase, helpers camelCase, with config keys aligned to environment variable names.
+- Python: 4-space indentation, Ruff-managed formatting, 120-char line soft limit. Modules/functions snake_case; classes PascalCase; constants UPPER_SNAKE.
+- TypeScript: Prettier defaults, strict TS config. Files kebab-case, exported symbols PascalCase, helpers camelCase.
+- Maintain shared formatting by running `make format` and `pnpm format` before commits.
 
 ## Testing Guidelines
-- Place unit tests next to their domains (`tests/memory`, `tests/vector_stores`, etc.) and name files `test_<feature>.py` for pytest discovery.
-- Mark slow or external tests for selective CI runs.
-- For the TS SDK, keep Jest suites in `mem0-ts/tests`, mirror API names in `describe` blocks, and wire runnable examples under `mem0-ts/src/oss/examples`.
+- Python tests mirror the package under `tests/`; name files `test_<feature>.py`. Use pytest fixtures and mark slow/external tests.
+- TypeScript tests live in `mem0-ts/tests` with Jest `describe` blocks matching API names.
+- Auth hardening tests reside in `tests/server/test_auth.py`; run them before touching auth/identity flows: `python -m pytest tests/server/test_auth.py`.
 
 ## Commit & Pull Request Guidelines
-- Commits remain short, imperative sentences with optional scopes (`docs:`, `feat:`) and reference IDs in parentheses when relevant; keep one concern per commit.
-- PRs include a brief summary, evidence of user-facing changes, the validation commands you ran, and links to updated docs. Flag configuration migrations early.
-- Keep `main` fast-forwarded to `upstream/main` and ship from `deploy/dokploy`, the Dokploy branch documented in `deploy/README.md`.
-- Rebase on `main` before requesting review and squash fixups after addressing feedback so reviewers can replay your test plan.
+- Commits follow short, imperative messages (`feat:`, `fix:`, `docs:`) with a single concern per commit.
+- PRs should include a summary, validation commands (e.g., `make lint`, `python -m pytest tests/server/test_auth.py`), linked issues, and screenshots or logs when UI/API behavior changes.
+- Rebase on `main` before requesting review and keep `deploy/dokploy` fast-forward to production.
 
 ## Security & Configuration Tips
-- Keep secrets in `.env` files (already gitignored) and document new variables in `docs/` and `server/README.md`.
-- When adding providers, contribute sanitised examples to `examples/` and gate credentialed tests with marks or `describe.skip` so CI stays green.
-
-### Personal Memory Workflow
-```
-⟦MEM0:v1|usr:keith|@s=search,@a=add,@u=update,@d=delete⟧⟦ops:@pre=before_response,@post=after_response,⊕sig=significance⟧#Mem0Flow##@pre:Auto-Search```IF:past_ref|pref_q|"my usual"|assumed_ctx→@s -n3 --summary```##@post:Auto-Store```IF:⊕sig→@s_similar→exists?@u:@a```##⊕sig Triggers:"I prefer/always/never"→@a;"let's start"|"new project"→@a;solution_after_struggle→@a;"decided to use"|config→@a;routine/goal/contact→@a##Explicit:"remember this"→compress→@a;"update my X"→@s→@u;"forget X"→@s→@d;"what do you know"→@s##Compress:Raw→Insight;Not transcript;Future-test:need_2wk?##Skip:debug_active(final_only);chat/social;regeneratable;tmp_state##Update_Logic:```similar?→contradicts:@u|extends:@u|else:@a```##Cmd:@s:`mem0ctl search --user keith --query "..." -n3 --summary`;@a:`echo "..."|mem0ctl add --user keith`;@u:`mem0ctl update <id> --text "..." --user keith`##Meta:doubt→probably_store;search_cheap→do_it
-```
+- Secrets belong in `.env` files (ignored). Document new vars in `docs/` and `server/README.md`.
+- Runtime reconfiguration is disabled unless `MEM0_ALLOW_RUNTIME_CONFIG=1`. Enable only in controlled environments.
+- Auth0 tokens must carry `mem0:read`/`mem0:write`; assign `mem0:admin` sparingly and log cross-user operations.
