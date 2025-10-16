@@ -26,8 +26,8 @@ RUN pip install fastapi==0.115.8 \
 # Copy API server code.
 COPY server /app/server
 
-WORKDIR /app/server
+WORKDIR /app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
