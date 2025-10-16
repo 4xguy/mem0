@@ -295,18 +295,33 @@ def search_memories(search_req: SearchRequest):
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
 def update_memory(memory_id: str, updated_memory: Dict[str, Any]):
-    """Update an existing memory with new content.
-    
-    Args:
-        memory_id (str): ID of the memory to update
-        updated_memory (str): New content to update the memory with
-        
-    Returns:
-        dict: Success message indicating the memory was updated
-    """
+    """Update an existing memory with new content."""
     try:
         memory = get_memory_instance()
-        return memory.update(memory_id=memory_id, data=updated_memory)
+        update_text = None
+        if isinstance(updated_memory, dict):
+            update_text = (
+                updated_memory.get("data")
+                or updated_memory.get("memory")
+            )
+            if update_text is None:
+                messages = updated_memory.get("messages")
+                if isinstance(messages, list) and messages:
+                    first = messages[0]
+                    if isinstance(first, dict):
+                        update_text = first.get("content")
+        else:
+            update_text = str(updated_memory)
+
+        if not update_text:
+            raise HTTPException(
+                status_code=400,
+                detail=json_error("UPDATE_PAYLOAD_INVALID", "Provide updated text via 'data', 'memory', or 'messages'."),
+            )
+
+        return memory.update(memory_id=memory_id, data=update_text)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error in update_memory:")
         raise HTTPException(status_code=500, detail=str(e))
