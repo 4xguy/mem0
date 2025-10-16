@@ -3,7 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from fastapi.exceptions import RequestValidationError
@@ -150,6 +150,35 @@ async def rate_limit(request: Request, call_next):
     return await call_next(request)
 
 app = FastAPI(
+    title="Mem0 REST APIs",
+    description="A REST API for managing and searching memories for your AI Agents and Apps.",
+    version="1.0.0",
+)
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        return await call_next(request)
+    path = request.url.path
+    if path in {"/health", "/docs", "/openapi.json"}:
+        return await call_next(request)
+    # naive per-IP per-minute window
+    ip = request.client.host if request.client else "unknown"
+    key = (ip, path)
+    import time
+    now = int(time.time())
+    window = now // 60
+    count, curwin = _rate_windows.get(key, (0, window))
+    if curwin != window:
+        count = 0
+        curwin = window
+    count += 1
+    _rate_windows[key] = (count, curwin)
+    if count > RATE_LIMIT_PER_MINUTE:
+        from fastapi import status
+        return JSONResponse(json_error("RATE_LIMIT_EXCEEDED", "Too many requests.", {"limit": RATE_LIMIT_PER_MINUTE, "window": "1m"}), status_code=status.HTTP_429_TOO_MANY_REQUESTS, headers={"Retry-After": "60"})
+    return await call_next(request)
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -169,14 +198,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     import traceback
-    logging.exception("Unhandled error: %s", exc)
+    import logging as _logging
+    _logging.exception("Unhandled error: %s", exc)
     return JSONResponse(json_error("INTERNAL_ERROR", "An unexpected error occurred."), status_code=500)
-
-    title="Mem0 REST APIs",
-    description="A REST API for managing and searching memories for your AI Agents and Apps.",
-    version="1.0.0",
-)
-
 
 class Message(BaseModel):
     role: str = Field(..., description="Role of the message (user or assistant).")
@@ -272,8 +296,7 @@ def search_memories(search_req: SearchRequest):
             try:
                 mem_texts = [r.get("memory", "") for r in results.get("results", []) if r.get("memory")]
                 if mem_texts:
-                    content = "
-".join(f"- {m}" for m in mem_texts)
+                    content = "\n".join(f"- {m}" for m in mem_texts)
                     system = "You are a concise assistant. Summarize the following memories in <=150 tokens without bullets. Focus on stable preferences and facts."
                     msg = [{"role": "system", "content": system}, {"role": "user", "content": content}]
                     summary_text = memory.llm.generate_response(msg, max_tokens=max_summary_tokens)
