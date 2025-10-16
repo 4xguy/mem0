@@ -64,3 +64,18 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
      -d '{"messages":[{"role":"user","content":"Needs follow up"}],"user_id":"someone_else"}' \
      https://mem0.icvida.com/memories
 ```
+
+## Rollout Plan
+- Stage behind a feature flag in Dokploy and validate with admin + non-admin tokens before enabling cluster-wide.
+- Monitor `/health` and the new authorization tests in staging for 10 minutes prior to production rollout.
+- Promote to production during a low-traffic window; keep the previous container image for fast rollback.
+
+## Monitoring & Alerting
+- Add dashboards for 401/403 error counts grouped by `error.error_code` to detect unexpected access denials.
+- Track `mem0:admin` usage separately to surface cross-user actions for auditing.
+- Configure alerts when 403s spike above baseline for 5 consecutive minutes.
+
+## Migration Notes
+- Legacy records without `user_id` continue to require admin tokens until migrated; schedule the remap script post-rollout.
+- Keep the migration script in maintenance mode so admins can progressively rewrite `user_id` fields without downtime.
+- Document the migration outcome (counts before/after) in the runbook once complete.

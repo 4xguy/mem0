@@ -28,6 +28,6 @@
 - [x] Highlighted admin/default identity behavior so integrators plan for Auth0 subject binding.
 
 ## Phase 5 – Testing, Rollout, & Migration Support
-- Author unit/integration tests covering valid/invalid JWTs, default-to-sub behavior, and admin override cases.
-- Prepare rollout switch (feature flag or staged deploy) and define monitoring for 401/403 spikes.
-- Draft optional migration playbook for legacy user IDs, including scripts and dry-run guidance.
+- [x] Added FastAPI auth enforcement tests in `tests/server/test_auth.py` covering default-to-sub, scope failures, and admin overrides.
+- [x] Documented rollout sequencing and 401/403 monitoring actions in `docs/mem0-jwt-phase0-prep.md`.
+- [x] Captured legacy migration guidance (script reuse + tracking) so admins can rewrite historical `user_id` values post-rollout.
