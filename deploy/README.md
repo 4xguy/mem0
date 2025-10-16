@@ -69,3 +69,34 @@ Backport the fix to `main` if it is not already there (`git switch main && git c
 ## Keeping Upstream Changes
 - Periodically confirm `git status` on `main` is clean and `git status` on `deploy/dokploy` only shows expected differences.
 - If a rebase introduces conflicts, resolve them on the feature branch before touching `deploy/dokploy`.
+
+
+## Runtime Notes
+
+### Health check
+- Configure Dokploy (or any load balancer) to poll `GET /health` every 10 seconds (timeout 5 seconds) so unhealthy pods are recycled automatically.
+- The endpoint returns `{"status":"ok"}` when the Mem0 backend has initialised successfully.
+
+### Error payload shape
+All error responses share this envelope so clients can summarise failures easily:
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Too many requests.",
+    "details": {"limit": 60, "window": "1m"}
+  }
+}
+```
+Codes include `VALIDATION_ERROR`, `HTTP_ERROR`, `INTERNAL_ERROR`, and `RATE_LIMIT_EXCEEDED`.
+
+### Rate limiting
+- Optional env var: `MEM0_RATE_LIMIT_PER_MINUTE` (default `0`, disabled).
+- When set > 0 the per-IP middleware returns 429 with the envelope above and a `Retry-After: 60` header.
+
+### Identity probe
+- `GET /whoami` returns `{ "status": "ok", "authorization": "Bearer …" }`, letting CLIs confirm which token (if any) was forwarded.
+- `GET /health` remains the preferred readiness probe.
+
+### Search summaries
+- `POST /search` accepts `{ "summary": true, "max_summary_tokens": 150 }` to include a concise LLM-generated summary alongside results.

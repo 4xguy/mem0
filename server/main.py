@@ -367,6 +367,16 @@ def reset_memory():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/whoami", summary="Report request identity")
+def whoami(request: Request):
+    """Return basic information about the current request/authorization header."""
+    auth_header = request.headers.get("authorization")
+    return {
+        "status": "ok",
+        "authorization": auth_header or None,
+    }
+
+
 @app.get("/", summary="Redirect to the OpenAPI documentation", include_in_schema=False)
 def home():
     """Redirect to the OpenAPI documentation."""
