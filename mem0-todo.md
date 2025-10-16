@@ -12,10 +12,10 @@
 - [x] Thread the dependency through all routers except `/health`, ensuring shared wiring for future endpoints (see `_identity` dependency usage in `server/main.py`).
 
 ## Phase 2 – Ownership & Access Enforcement
-- Default request context `user_id` to the caller's `sub` when the payload omits the field.
-- Add ownership validation to search/read paths; reject mismatched identifiers unless the caller has admin privileges.
-- Enforce same-subject requirements on add/update/delete/reset flows, including payload mutation for add when user_id is omitted.
-- Preserve the existing JSON error envelope when returning 401/403 responses and document new error codes/messages.
+- [x] Default request context `user_id` to the caller's `sub` when omitted via `bind_user_to_identity`; applied to create/search/list/delete-all routes.
+- [x] Add ownership validation to search/read paths; non-admin cross-user attempts now trigger `FORBIDDEN` with details through `bind_user_to_identity` and `ensure_memory_access`.
+- [x] Enforce same-subject requirements on add/update/delete/reset flows, including payload mutation for add and admin-only reset.
+- [x] Preserve the existing JSON error envelope for 401/403 responses using `json_error` across new authorization guards.
 
 ## Phase 3 – Scope Handling & Admin Overrides
 - Define required scopes per operation (`mem0:read`, `mem0:write`, optional `mem0:admin`) and wire checks into the identity dependency.

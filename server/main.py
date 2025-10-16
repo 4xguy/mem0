@@ -73,6 +73,68 @@ def require_identity(authorization: str = Header(default=None)) -> Identity:
         )
     return identity
 
+ADMIN_SCOPE = "mem0:admin"
+
+
+def has_admin(identity: Identity) -> bool:
+    return ADMIN_SCOPE in identity.scopes
+
+
+def bind_user_to_identity(
+    requested_user_id: Optional[str],
+    identity: Identity,
+    *,
+    operation: str,
+    resource: Optional[str] = None,
+) -> str:
+    if requested_user_id is None:
+        return identity.sub
+    if requested_user_id == identity.sub or has_admin(identity):
+        return requested_user_id
+    details = {
+        "requested_user_id": requested_user_id,
+        "sub": identity.sub,
+        "operation": operation,
+    }
+    if resource is not None:
+        details["resource"] = resource
+    raise HTTPException(
+        status_code=403,
+        detail=json_error("FORBIDDEN", "Cross-user access requires mem0:admin", details),
+    )
+
+
+def ensure_memory_access(
+    record: Dict[str, Any],
+    identity: Identity,
+    *,
+    operation: str,
+    resource: str,
+) -> None:
+    owner = record.get("user_id")
+    if owner is None:
+        if has_admin(identity):
+            return
+        raise HTTPException(
+            status_code=403,
+            detail=json_error(
+                "FORBIDDEN",
+                "Memory ownership is undefined; admin token required.",
+                {"operation": operation, "resource": resource, "sub": identity.sub},
+            ),
+        )
+    if owner == identity.sub or has_admin(identity):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=json_error(
+            "FORBIDDEN",
+            "Cross-user access requires mem0:admin",
+            {"owner": owner, "sub": identity.sub, "operation": operation, "resource": resource},
+        ),
+    )
+
+
 history_dir = os.path.dirname(HISTORY_DB_PATH)
 if history_dir:
     os.makedirs(history_dir, exist_ok=True)
@@ -231,8 +293,17 @@ class SearchRequest(BaseModel):
 
 
 @app.post("/configure", summary="Configure Mem0")
-def set_config(config: Dict[str, Any], _identity: Identity = Depends(require_identity)):
+def set_config(config: Dict[str, Any], identity: Identity = Depends(require_identity)):
     """Set memory configuration."""
+    if not has_admin(identity):
+        raise HTTPException(
+            status_code=403,
+            detail=json_error(
+                "FORBIDDEN",
+                "Admin scope mem0:admin is required to update configuration.",
+                {"operation": "config:set", "sub": identity.sub},
+            ),
+        )
     global MEMORY_INSTANCE, MEMORY_INIT_ERROR, DEFAULT_CONFIG
     MEMORY_INSTANCE = Memory.from_config(config)
     DEFAULT_CONFIG = config
@@ -241,12 +312,15 @@ def set_config(config: Dict[str, Any], _identity: Identity = Depends(require_ide
 
 
 @app.post("/memories", summary="Create memories")
-def add_memory(memory_create: MemoryCreate, _identity: Identity = Depends(require_identity)):
+def add_memory(memory_create: MemoryCreate, identity: Identity = Depends(require_identity)):
     """Store new memories."""
-    if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
+    bound_user_id = bind_user_to_identity(
+        memory_create.user_id, identity, operation="memories:create", resource="payload"
+    )
+    memory_create.user_id = bound_user_id
 
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
+    params["user_id"] = bound_user_id
     try:
         memory = get_memory_instance()
         response = memory.add(messages=[m.model_dump() for m in memory_create.messages], **params)
@@ -261,11 +335,10 @@ def get_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    _identity: Identity = Depends(require_identity),
+    identity: Identity = Depends(require_identity),
 ):
     """Retrieve stored memories."""
-    if not any([user_id, run_id, agent_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier is required.")
+    user_id = bind_user_to_identity(user_id, identity, operation="memories:list", resource="query")
     try:
         memory = get_memory_instance()
         params = {
@@ -278,25 +351,38 @@ def get_all_memories(
 
 
 @app.get("/memories/{memory_id}", summary="Get a memory")
-def get_memory_item(memory_id: str, _identity: Identity = Depends(require_identity)):
+def get_memory_item(memory_id: str, identity: Identity = Depends(require_identity)):
     """Retrieve a specific memory by ID."""
     try:
         memory = get_memory_instance()
-        return memory.get(memory_id)
+        record = memory.get(memory_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=json_error("NOT_FOUND", "Memory not found.", {"memory_id": memory_id}),
+            )
+        ensure_memory_access(record, identity, operation="memories:get", resource=memory_id)
+        return record
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error in get_memory:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/search", summary="Search memories")
-def search_memories(search_req: SearchRequest, _identity: Identity = Depends(require_identity)):
+def search_memories(search_req: SearchRequest, identity: Identity = Depends(require_identity)):
     """Search for memories based on a query."""
     try:
         memory = get_memory_instance()
         payload = search_req.model_dump()
+        payload["user_id"] = bind_user_to_identity(
+            payload.get("user_id"), identity, operation="memories:search", resource="query"
+        )
         summary = payload.pop("summary", False)
         max_summary_tokens = payload.pop("max_summary_tokens", 150)
-        results = memory.search(query=search_req.query, **{k: v for k, v in payload.items() if k != "query" and v is not None})
+        query = payload.pop("query")
+        results = memory.search(query=query, **{k: v for k, v in payload.items() if v is not None})
         if summary:
             try:
                 mem_texts = [r.get("memory", "") for r in results.get("results", []) if r.get("memory")]
@@ -322,10 +408,18 @@ def search_memories(search_req: SearchRequest, _identity: Identity = Depends(req
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
-def update_memory(memory_id: str, updated_memory: Dict[str, Any], _identity: Identity = Depends(require_identity)):
+def update_memory(memory_id: str, updated_memory: Dict[str, Any], identity: Identity = Depends(require_identity)):
     """Update an existing memory with new content."""
     try:
         memory = get_memory_instance()
+        record = memory.get(memory_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=json_error("NOT_FOUND", "Memory not found.", {"memory_id": memory_id}),
+            )
+        ensure_memory_access(record, identity, operation="memories:update", resource=memory_id)
+
         update_text = None
         if isinstance(updated_memory, dict):
             update_text = (
@@ -356,23 +450,41 @@ def update_memory(memory_id: str, updated_memory: Dict[str, Any], _identity: Ide
 
 
 @app.get("/memories/{memory_id}/history", summary="Get memory history")
-def memory_history(memory_id: str, _identity: Identity = Depends(require_identity)):
+def memory_history(memory_id: str, identity: Identity = Depends(require_identity)):
     """Retrieve memory history."""
     try:
         memory = get_memory_instance()
+        record = memory.get(memory_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=json_error("NOT_FOUND", "Memory not found.", {"memory_id": memory_id}),
+            )
+        ensure_memory_access(record, identity, operation="memories:history", resource=memory_id)
         return memory.history(memory_id=memory_id)
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error in memory_history:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/memories/{memory_id}", summary="Delete a memory")
-def delete_memory(memory_id: str, _identity: Identity = Depends(require_identity)):
+def delete_memory(memory_id: str, identity: Identity = Depends(require_identity)):
     """Delete a specific memory by ID."""
     try:
         memory = get_memory_instance()
+        record = memory.get(memory_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=json_error("NOT_FOUND", "Memory not found.", {"memory_id": memory_id}),
+            )
+        ensure_memory_access(record, identity, operation="memories:delete", resource=memory_id)
         memory.delete(memory_id=memory_id)
         return {"message": "Memory deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error in delete_memory:")
         raise HTTPException(status_code=500, detail=str(e))
@@ -383,11 +495,10 @@ def delete_all_memories(
     user_id: Optional[str] = None,
     run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    _identity: Identity = Depends(require_identity),
+    identity: Identity = Depends(require_identity),
 ):
     """Delete all memories for a given identifier."""
-    if not any([user_id, run_id, agent_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier is required.")
+    user_id = bind_user_to_identity(user_id, identity, operation="memories:delete_all", resource="query")
     try:
         memory = get_memory_instance()
         params = {
@@ -401,8 +512,13 @@ def delete_all_memories(
 
 
 @app.post("/reset", summary="Reset all memories")
-def reset_memory(_identity: Identity = Depends(require_identity)):
+def reset_memory(identity: Identity = Depends(require_identity)):
     """Completely reset stored memories."""
+    if not has_admin(identity):
+        raise HTTPException(
+            status_code=403,
+            detail=json_error("FORBIDDEN", "Admin scope mem0:admin is required to reset all memories.", {"operation": "memories:reset", "sub": identity.sub}),
+        )
     try:
         memory = get_memory_instance()
         memory.reset()
