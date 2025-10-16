@@ -125,30 +125,6 @@ def get_memory_instance() -> Memory:
     return MEMORY_INSTANCE
 
 
-@app.middleware("http")
-async def rate_limit(request: Request, call_next):
-    if RATE_LIMIT_PER_MINUTE <= 0:
-        return await call_next(request)
-    path = request.url.path
-    if path in {"/health", "/docs", "/openapi.json"}:
-        return await call_next(request)
-    # naive per-IP per-minute window
-    ip = request.client.host if request.client else "unknown"
-    key = (ip, path)
-    import time
-    now = int(time.time())
-    window = now // 60
-    count, curwin = _rate_windows.get(key, (0, window))
-    if curwin != window:
-        count = 0
-        curwin = window
-    count += 1
-    _rate_windows[key] = (count, curwin)
-    if count > RATE_LIMIT_PER_MINUTE:
-        from fastapi import status
-        return JSONResponse(json_error("RATE_LIMIT_EXCEEDED", "Too many requests.", {"limit": RATE_LIMIT_PER_MINUTE, "window": "1m"}), status_code=status.HTTP_429_TOO_MANY_REQUESTS, headers={"Retry-After": "60"})
-    return await call_next(request)
-
 app = FastAPI(
     title="Mem0 REST APIs",
     description="A REST API for managing and searching memories for your AI Agents and Apps.",
