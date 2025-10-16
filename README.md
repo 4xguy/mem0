@@ -176,3 +176,22 @@ Apache 2.0 — see the [LICENSE](https://github.com/mem0ai/mem0/blob/main/LICENS
   - `echo "I like teal" | mem0ctl add --user demo`
   - `mem0ctl search --user demo --query "favorite color" -n 3`
 - The CLI communicates with this server over `/memories` and `/search`, returning compact JSON by default.
+
+### Environment & RBAC checklist
+- Required env vars: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `OPENAI_API_KEY`, the `POSTGRES_*` credentials, optional `NEO4J_*`/`MEMGRAPH_*`.
+- Runtime reconfiguration is disabled by default; set `MEM0_ALLOW_RUNTIME_CONFIG=1` **only** in controlled environments to enable `/configure`.
+- Enable Auth0 RBAC for the Mem0 API (toggle **Enable RBAC** and **Add permissions in the Access Token**), then create roles that grant `mem0:read` and `mem0:write`. Grant `mem0:admin` only to trusted operators.
+- Use a Post-Login Action (or manual assignment) so CLI users automatically receive the mem0 CLI role; admin accounts should receive an additional role for `mem0:admin`.
+- When testing multiple accounts with `mem0ctl`, sign out of Auth0 or open the device-authorization link in an incognito window so you pick the desired user.
+
+### Smoke tests
+Run these after deploying:
+```bash
+python3 -m compileall server
+source .venv/bin/activate && python -m pytest tests/server/test_auth.py
+curl -i https://mem0.icvida.com/health
+# user token
+token=$(mem0ctl whoami --raw 2>/dev/null || jq -r '.access_token' ~/.config/mem0/credentials.json)
+curl -H "Authorization: Bearer $token" "https://mem0.icvida.com/memories?user_id=<auth0-sub>"
+```
+Replace `<auth0-sub>` with the subject returned by `mem0ctl whoami`. Use a non-admin token to confirm cross-user requests return 403, and an admin token to confirm overrides succeed.
