@@ -38,6 +38,8 @@ Observations:
 
 ## Scope Enforcement Summary
 - `mem0:read` gates GET/search flows (list, search, get by ID, history).
+
+- `/configure` is gated by `MEM0_ALLOW_RUNTIME_CONFIG`; leave it unset in production so the endpoint returns 403 even for admin tokens.
 - `mem0:write` is required for add/update/delete/reset paths.
 - `mem0:admin` allows cross-user overrides and privileged endpoints such as `/configure` and `/reset`.
 - Admin tokens bypass the helper scope checks but should still include `mem0:write` for destructive workflows.

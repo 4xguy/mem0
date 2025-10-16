@@ -36,6 +36,7 @@ AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN")
 AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+MEM0_ALLOW_RUNTIME_CONFIG = os.environ.get("MEM0_ALLOW_RUNTIME_CONFIG", "").lower() in {"1", "true", "yes"}
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 ENABLE_GRAPH = os.environ.get("MEM0_ENABLE_GRAPH", "").lower() in {"1", "true", "yes"}
 
@@ -330,6 +331,11 @@ class SearchRequest(BaseModel):
 @app.post("/configure", summary="Configure Mem0")
 def set_config(config: Dict[str, Any], identity: Identity = Depends(require_identity)):
     """Set memory configuration."""
+    if not MEM0_ALLOW_RUNTIME_CONFIG:
+        raise HTTPException(
+            status_code=403,
+            detail=json_error("FORBIDDEN", "Runtime configuration is disabled.", {"operation": "config:set"}),
+        )
     if not has_admin(identity):
         raise HTTPException(
             status_code=403,

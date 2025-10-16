@@ -44,7 +44,7 @@ Dokploy picks the latest commit and redeploys. Tag releases if desired (`git tag
 
 ## Dokploy Configuration
 - **Build:** set the Dokploy service to build from the repository root with the provided `Dockerfile`. Select branch `deploy/dokploy` and leave the build target default (`runtime`).
-- **Environment variables:** map `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, and `OPENAI_API_KEY` (or other LLM credentials) along with any custom `POSTGRES_*`, `NEO4J_*`, `MEMGRAPH_*`, and `HISTORY_DB_PATH` values to point at your managed data stores. The defaults assume Postgres with pgvector, Neo4j, and a writable `/app/history/history.db`.
+- **Environment variables:** map `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, and `OPENAI_API_KEY` (or other LLM credentials) along with any custom `POSTGRES_*`, `NEO4J_*`, `MEMGRAPH_*`, and `HISTORY_DB_PATH` values to point at your managed data stores. Set `MEM0_ALLOW_RUNTIME_CONFIG=1` only if you intend to enable the `/configure` endpoint; leave it unset/false in production. The defaults assume Postgres with pgvector, Neo4j, and a writable `/app/history/history.db`.
 - **Ports:** expose port `8000` (the container listens on 0.0.0.0:8000). Configure Dokploy routing or load balancer rules accordingly.
 - **Dependencies:** provision Postgres (with pgvector extension), Neo4j, and optional cache/vector stores as network-accessible services. Use Dokploy’s managed databases or external providers.
 - **Health check:** hit `/docs` or `/memories` with a GET request after deploy to confirm the FastAPI app is serving traffic.
