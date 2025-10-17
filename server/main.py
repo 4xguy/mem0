@@ -315,6 +315,7 @@ class MemoryCreate(BaseModel):
     agent_id: Optional[str] = None
     run_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    wait_for_index: Optional[bool] = Field(default=False, description="Force index refresh for read-your-writes.")
 
 
 class SearchRequest(BaseModel):
@@ -326,6 +327,7 @@ class SearchRequest(BaseModel):
     summary: Optional[bool] = Field(default=False, description="Return a compact summary of results.")
     max_summary_tokens: Optional[int] = Field(default=150, description="Upper bound for summary tokens.")
     filters: Optional[Dict[str, Any]] = None
+    enable_graph: Optional[bool] = Field(default=None, description="Include graph relations when available.")
 
 
 @app.post("/configure", summary="Configure Mem0")
@@ -367,9 +369,75 @@ def add_memory(memory_create: MemoryCreate, identity: Identity = Depends(require
     try:
         memory = get_memory_instance()
         response = memory.add(messages=[m.model_dump() for m in memory_create.messages], **params)
+        # Optional read-your-writes: refresh index on supported backends
+        if memory_create.wait_for_index:
+            try:
+                memory.vector_store.refresh()
+            except Exception:  # pragma: no cover
+                pass
         return JSONResponse(content=response)
     except Exception as e:
         logging.exception("Error in add_memory:")  # This will log the full traceback
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpsertRequest(BaseModel):
+    messages: List[Message] = Field(..., description="List of messages (first item used for text).")
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    run_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    wait_for_index: Optional[bool] = Field(default=False, description="Force index refresh for read-your-writes.")
+
+
+@app.post("/memories/upsert", summary="Upsert memory by fpmp_key + subject")
+def upsert_memory(upsert: UpsertRequest, identity: Identity = Depends(require_identity)):
+    """Create or update a memory keyed by metadata.fpmp_key + bound subject."""
+    require_scope(identity, WRITE_SCOPE, operation="memories:upsert")
+
+    if not upsert.messages:
+        raise HTTPException(status_code=400, detail=json_error("UPsert_INVALID", "messages are required"))
+
+    bound_user_id = bind_user_to_identity(upsert.user_id, identity, operation="memories:upsert", resource="payload")
+    text = upsert.messages[0].content
+    metadata = dict(upsert.metadata or {})
+    fpmp_key = metadata.get("fpmp_key")
+    if not fpmp_key:
+        raise HTTPException(status_code=400, detail=json_error("UPsert_KEY_REQUIRED", "metadata.fpmp_key is required"))
+
+    try:
+        memory = get_memory_instance()
+        # Look for existing memory with same fpmp_key scoped to this subject
+        existing = memory.get_all(user_id=bound_user_id, filters={"fpmp_key": fpmp_key}, limit=5)
+        results = existing.get("results") if isinstance(existing, dict) else existing
+        if results:
+            target_id = results[0].get("id")
+            memory.update(memory_id=target_id, data=text)
+            response = {"results": [{"id": target_id, "memory": text, "event": "UPDATE"}]}
+        else:
+            # Force raw add (no inference) to guarantee creation
+            add_result = memory.add(
+                messages=[{"role": "user", "content": text}],
+                user_id=bound_user_id,
+                agent_id=upsert.agent_id,
+                run_id=upsert.run_id,
+                metadata=metadata,
+                infer=False,
+            )
+            # Expect at least one result with id
+            created = (add_result.get("results") or []) if isinstance(add_result, dict) else add_result
+            response = {"results": created or [{"id": None, "memory": text, "event": "ADD"}]}
+
+        if upsert.wait_for_index:
+            try:
+                memory.vector_store.refresh()
+            except Exception:  # pragma: no cover
+                pass
+        return JSONResponse(content=response)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Error in upsert_memory:")
         raise HTTPException(status_code=500, detail=str(e))
 
 

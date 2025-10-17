@@ -240,6 +240,12 @@ class OpenSearchDB(VectorStoreBase):
         """Delete a collection (index)."""
         self.client.indices.delete(index=self.collection_name)
 
+    def refresh(self) -> None:  # best-effort index refresh for read-your-writes
+        try:
+            self.client.indices.refresh(index=self.collection_name)
+        except Exception:  # pragma: no cover
+            logger.debug("OpenSearch refresh not available or failed; proceeding without.")
+
     def col_info(self, name: str) -> Any:
         """Get information about a collection (index)."""
         return self.client.indices.get(index=name)

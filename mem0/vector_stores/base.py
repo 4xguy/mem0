@@ -56,3 +56,8 @@ class VectorStoreBase(ABC):
     def reset(self):
         """Reset by delete the collection and recreate it."""
         pass
+
+    # Optional hook: subclasses may implement a fast index refresh to provide read-your-writes behavior.
+    # Default is a no-op; backends that support refresh (e.g., Elasticsearch/OpenSearch) can override.
+    def refresh(self) -> None:  # pragma: no cover - optional
+        return None
