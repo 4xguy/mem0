@@ -364,13 +364,15 @@ def add_memory(memory_create: MemoryCreate, identity: Identity = Depends(require
     )
     memory_create.user_id = bound_user_id
 
-    params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
+    model_dump = memory_create.model_dump()
+    should_refresh = bool(model_dump.get("wait_for_index"))
+    params = {k: v for k, v in model_dump.items() if v is not None and k not in {"messages", "wait_for_index"}}
     params["user_id"] = bound_user_id
     try:
         memory = get_memory_instance()
         response = memory.add(messages=[m.model_dump() for m in memory_create.messages], **params)
         # Optional read-your-writes: refresh index on supported backends
-        if memory_create.wait_for_index:
+        if should_refresh:
             try:
                 memory.vector_store.refresh()
             except Exception:  # pragma: no cover
