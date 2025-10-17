@@ -493,10 +493,16 @@ def search_memories(search_req: SearchRequest, identity: Identity = Depends(requ
         payload["user_id"] = bind_user_to_identity(
             payload.get("user_id"), identity, operation="memories:search", resource="query"
         )
+        # Extract ancillary flags and remove them from payload to match Memory.search signature
         summary = payload.pop("summary", False)
         max_summary_tokens = payload.pop("max_summary_tokens", 150)
+        enable_graph = payload.pop("enable_graph", None)
         query = payload.pop("query")
         results = memory.search(query=query, **{k: v for k, v in payload.items() if v is not None})
+        # If caller explicitly disabled graph, strip relations from the response
+        if enable_graph is False and isinstance(results, dict) and "relations" in results:
+            results = dict(results)
+            results.pop("relations", None)
         if summary:
             try:
                 mem_texts = [r.get("memory", "") for r in results.get("results", []) if r.get("memory")]
