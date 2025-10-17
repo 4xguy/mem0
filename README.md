@@ -175,7 +175,20 @@ Apache 2.0 — see the [LICENSE](https://github.com/mem0ai/mem0/blob/main/LICENS
   - `mem0ctl login` (Auth0 device code)
   - `echo "I like teal" | mem0ctl add --user demo`
   - `mem0ctl search --user demo --query "favorite color" -n 3`
-- The CLI communicates with this server over `/memories` and `/search`, returning compact JSON by default.
+- The CLI communicates with this server over `/memories`, `/memories/upsert`, and `/search`, returning compact JSON by default.
+
+### Server API updates (self‑hosted)
+- `POST /search` accepts `enable_graph=true` to include a `relations` array alongside `results` (when graph memory is enabled).
+- `POST /memories` accepts `wait_for_index=true` in the JSON body to force an index refresh for read‑your‑writes on backends that support it (Elasticsearch/OpenSearch). Default is `false` for lower latency.
+- `POST /memories/upsert` creates or updates a memory keyed by `metadata.fpmp_key` + the authenticated subject. Body:
+  ```json
+  {
+    "messages": [{"role": "user", "content": "P – Coffee: black (2025-10-17)"}],
+    "metadata": {"fpmp_key": "p-coffee"},
+    "wait_for_index": true
+  }
+  ```
+  Response contains a single entry under `results` with `event: "ADD"` or `"UPDATE"` and the memory `id`.
 
 ### Environment & RBAC checklist
 - Required env vars: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `OPENAI_API_KEY`, the `POSTGRES_*` credentials, optional `NEO4J_*`/`MEMGRAPH_*`.
